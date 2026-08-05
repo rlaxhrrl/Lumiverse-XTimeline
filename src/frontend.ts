@@ -1,5 +1,6 @@
 import type { SpindleFrontendContext, SpindleModalHandle, SpindleSelectHandle } from 'lumiverse-spindle-types'
 import {
+  createTimelineId,
   MAX_WEAVE_LENGTH,
   MAX_DIRECT_MESSAGE_LENGTH,
   DEFAULT_GENERATION_MAX_TOKENS,
@@ -1694,7 +1695,7 @@ export function setup(ctx: SpindleFrontendContext) {
         content,
         gifQuery,
         optimisticMessage: {
-          id: `optimistic:${crypto.randomUUID()}`,
+          id: `optimistic:${createTimelineId()}`,
           author,
           direction: 'outgoing',
           content,

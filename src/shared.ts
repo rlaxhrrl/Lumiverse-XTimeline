@@ -13,6 +13,21 @@ export const MAX_GENERATION_MAX_TOKENS = 32_768
 export const DEFAULT_GENERATION_MAX_TOKENS = 2_048
 export const REACTION_EMOJIS = ['❤', '✨', '🔥', '😂'] as const
 
+let timelineIdSequence = 0
+
+/**
+ * Produces a locally unique identifier for timeline records.
+ *
+ * These IDs are only used to correlate locally stored posts, threads, and
+ * messages; they are not credentials or security tokens. The browser's secure
+ * context UUID API is unavailable on non-secure HTTP origins, so use the
+ * extension's existing non-cryptographic randomness instead.
+ */
+export function createTimelineId(): string {
+  timelineIdSequence = (timelineIdSequence + 1) >>> 0
+  return `xtl_${Date.now().toString(36)}_${timelineIdSequence.toString(36)}_${Math.random().toString(36).slice(2, 12)}`
+}
+
 export type TimelineActorKind = 'persona' | 'character' | 'council' | 'lumia'
 export type TimelineRosterAction = 'weave' | 'reply' | 'react' | 'dm'
 export type TimelineFeedSort = 'newest' | 'activity'

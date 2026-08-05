@@ -8,6 +8,7 @@ import type {
   SpindleAPI,
 } from 'lumiverse-spindle-types'
 import {
+  createTimelineId,
   createEmptyTimelineState,
   DEFAULT_CHAT_CONTEXT_MESSAGES,
   DEFAULT_GENERATION_MAX_TOKENS,
@@ -919,7 +920,7 @@ function createDirectMessage(input: {
   gifUrl?: string
 }): TimelineDirectMessage {
   return {
-    id: crypto.randomUUID(),
+    id: createTimelineId(),
     author: input.author,
     direction: input.direction,
     content: input.content,
@@ -964,7 +965,7 @@ function createPost(input: {
   chatContext?: TimelineChatContext
   gifUrl?: string
 }): TimelinePost {
-  const id = crypto.randomUUID()
+  const id = createTimelineId()
   return {
     id,
     author: input.author,
@@ -1131,7 +1132,7 @@ function uniqueActorHandle(preferred: string, unavailable: Set<string>): string 
     const candidate = `${base.slice(0, MAX_ACTOR_HANDLE_LENGTH - suffix.length)}${suffix}`
     if (!unavailable.has(candidate)) return candidate
   }
-  return `${base.slice(0, 11)}_${crypto.randomUUID().slice(0, 8)}`
+  return `${base.slice(0, 11)}_${createTimelineId().slice(-8)}`
 }
 
 function actorIdentityMessages(actor: TimelineActor, unavailable: Set<string>): LlmMessageDTO[] {
@@ -1651,7 +1652,7 @@ async function createActorDirectTurn(
 
   if (!thread) {
     thread = {
-      id: crypto.randomUUID(),
+      id: createTimelineId(),
       actor,
       messages: [],
       lastReadAt: 0,
@@ -1692,7 +1693,7 @@ async function startDirectThread(payload: UnknownRecord, userId: string): Promis
     )
     if (!content && !gifUrl) throw new Error('The actor returned an empty direct message.')
     const thread: TimelineDirectThread = {
-      id: crypto.randomUUID(),
+      id: createTimelineId(),
       actor,
       messages: [createDirectMessage({ author: actor, direction: 'incoming', content, gifUrl })],
       lastReadAt: 0,

@@ -13,6 +13,11 @@ var MIN_GENERATION_MAX_TOKENS = 32;
 var MAX_GENERATION_MAX_TOKENS = 32768;
 var DEFAULT_GENERATION_MAX_TOKENS = 2048;
 var REACTION_EMOJIS = ["❤", "✨", "\uD83D\uDD25", "\uD83D\uDE02"];
+var timelineIdSequence = 0;
+function createTimelineId() {
+  timelineIdSequence = timelineIdSequence + 1 >>> 0;
+  return `xtl_${Date.now().toString(36)}_${timelineIdSequence.toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
 function createEmptyTimelineState() {
   return {
     version: 8,
@@ -767,7 +772,7 @@ function pruneDirectThreads(threads) {
 }
 function createDirectMessage(input) {
   return {
-    id: crypto.randomUUID(),
+    id: createTimelineId(),
     author: input.author,
     direction: input.direction,
     content: input.content,
@@ -797,7 +802,7 @@ function prunePosts(posts) {
   return keep;
 }
 function createPost(input) {
-  const id = crypto.randomUUID();
+  const id = createTimelineId();
   return {
     id,
     author: input.author,
@@ -942,7 +947,7 @@ function uniqueActorHandle(preferred, unavailable) {
     if (!unavailable.has(candidate))
       return candidate;
   }
-  return `${base.slice(0, 11)}_${crypto.randomUUID().slice(0, 8)}`;
+  return `${base.slice(0, 11)}_${createTimelineId().slice(-8)}`;
 }
 function actorIdentityMessages(actor, unavailable) {
   const unavailableList = [...unavailable].sort().slice(0, 120);
@@ -1364,7 +1369,7 @@ async function createActorDirectTurn(state, directory, actor, persona, userId) {
     throw new Error("The actor returned an empty direct message.");
   if (!thread) {
     thread = {
-      id: crypto.randomUUID(),
+      id: createTimelineId(),
       actor,
       messages: [],
       lastReadAt: 0
@@ -1397,7 +1402,7 @@ async function startDirectThread(payload, userId) {
     if (!content && !gifUrl)
       throw new Error("The actor returned an empty direct message.");
     const thread = {
-      id: crypto.randomUUID(),
+      id: createTimelineId(),
       actor,
       messages: [createDirectMessage({ author: actor, direction: "incoming", content, gifUrl })],
       lastReadAt: 0

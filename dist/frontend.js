@@ -6,6 +6,11 @@ var MIN_GENERATION_MAX_TOKENS = 32;
 var MAX_GENERATION_MAX_TOKENS = 32768;
 var DEFAULT_GENERATION_MAX_TOKENS = 2048;
 var REACTION_EMOJIS = ["❤", "✨", "\uD83D\uDD25", "\uD83D\uDE02"];
+var timelineIdSequence = 0;
+function createTimelineId() {
+  timelineIdSequence = timelineIdSequence + 1 >>> 0;
+  return `xtl_${Date.now().toString(36)}_${timelineIdSequence.toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
 
 // src/frontend.ts
 var READY_MIN_VERSION = [1, 0, 6];
@@ -1503,7 +1508,7 @@ function setup(ctx) {
         content,
         gifQuery,
         optimisticMessage: {
-          id: `optimistic:${crypto.randomUUID()}`,
+          id: `optimistic:${createTimelineId()}`,
           author,
           direction: "outgoing",
           content,
