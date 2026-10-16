@@ -8,6 +8,7 @@
   "description": "A private social timeline for personas, Lumia DLC items, character cards, and Council members.",
   "permissions": [
     "generation",
+    "cors_proxy",
     "characters",
     "personas",
     "chats",

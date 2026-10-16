@@ -1,4 +1,4 @@
-import type { SpindleFrontendContext, SpindleModalHandle, SpindleSelectHandle } from 'lumiverse-spindle-types'
+import type { ConnectionModelDTO, SpindleFrontendContext, SpindleModalHandle, SpindleModelComboboxHandle, SpindleSelectHandle } from 'lumiverse-spindle-types'
 import {
   createTimelineId,
   MAX_WEAVE_LENGTH,
@@ -34,6 +34,19 @@ interface TimelineBackendMessage {
   active?: boolean
   actorName?: string | null
   scope?: 'timeline' | 'dm'
+  connectionId?: string
+  requestId?: string
+  models?: ConnectionModelDTO[]
+  supported?: boolean
+}
+
+interface ConnectionModelCatalog {
+  connectionId: string
+  requestId: string
+  models: ConnectionModelDTO[]
+  loading: boolean
+  supported: boolean
+  message: string
 }
 
 function parseVersionSegment(segment: string | undefined): number {
@@ -53,16 +66,12 @@ function isVersionAtLeast(version: string, minimum: readonly number[]): boolean 
   return true
 }
 
-async function shouldBroadcastReadyForHost(): Promise<boolean> {
-  try {
-    const response = await fetch('/api/v1/system/info', { credentials: 'same-origin' })
-    if (!response.ok) return true
-    const payload = await response.json() as { backend?: { version?: unknown } }
-    const version = typeof payload?.backend?.version === 'string' ? payload.backend.version : null
-    return version ? isVersionAtLeast(version, READY_MIN_VERSION) : true
-  } catch {
-    return true
-  }
+function shouldBroadcastReadyForHost(ctx: SpindleFrontendContext): boolean {
+  // The host descriptor is supplied by Lumiverse itself, so no HTTP request
+  // is needed to learn its version. Unknown versions keep the previous
+  // permissive fallback (broadcast ready).
+  const version = typeof ctx.host?.lumiverseVersion === 'string' ? ctx.host.lumiverseVersion : null
+  return version ? isVersionAtLeast(version, READY_MIN_VERSION) : true
 }
 
 function createReadyGate(ctx: SpindleFrontendContext) {
@@ -74,7 +83,7 @@ function createReadyGate(ctx: SpindleFrontendContext) {
   }
 
   ctx.deferReady()
-  const shouldBroadcastReady = shouldBroadcastReadyForHost()
+  const shouldBroadcastReady = shouldBroadcastReadyForHost(ctx)
   let disposed = false
   let released = false
 
@@ -85,9 +94,7 @@ function createReadyGate(ctx: SpindleFrontendContext) {
     release() {
       if (disposed || released) return
       released = true
-      void shouldBroadcastReady.then((allowed) => {
-        if (!disposed && allowed) ctx.ready()
-      })
+      if (!disposed && shouldBroadcastReady) ctx.ready()
     },
   }
 }
@@ -376,6 +383,12 @@ export function setup(ctx: SpindleFrontendContext) {
   } | null = null
   let mentionedActorKeys: string[] = []
   let personaPicker: SpindleSelectHandle | null = null
+  let connectionPicker: SpindleSelectHandle | null = null
+  let modelPicker: SpindleModelComboboxHandle | null = null
+  let modelStatus: HTMLElement | null = null
+  let modelCatalog: ConnectionModelCatalog | null = null
+  let modelRequestSequence = 0
+  let modelDraft: { connectionId: string; value: string } | null = null
   let sliderHandles: any[] = []
   let disposeMentionPortal: (() => void) | null = null
   let disposeActorPickerPortal: (() => void) | null = null
@@ -626,6 +639,10 @@ export function setup(ctx: SpindleFrontendContext) {
     .xtl-settings-row { justify-content: space-between; align-items: flex-start; padding-top: 10px; border-top: 1px solid var(--xtl-line); }
     .xtl-settings-label { font-size: 13px; font-weight: 750; }
     .xtl-settings-hint { color: var(--xtl-muted); font-size: 11px; max-width: 240px; line-height: 1.4; margin-top: 3px; }
+    .xtl-connection-picker, .xtl-model-controls { width: 280px; max-width: 100%; min-width: 0; }
+    .xtl-model-controls { display: grid; gap: 8px; }
+    .xtl-model-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .xtl-model-status { color: var(--xtl-muted); font-size: 11px; line-height: 1.4; margin: 0; }
     .xtl-interval-inputs { display: flex; align-items: center; gap: 6px; color: var(--xtl-muted); font-size: 12px; }
     .xtl-number-input { width: 64px; box-sizing: border-box; border: 1px solid #3a4148; border-radius: 9px; background: #0a0d11; color: #f4f7fa; padding: 7px 6px; font: inherit; font-size: 12px; font-weight: 650; }
     .xtl-number-input:focus { border-color: var(--xtl-blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--xtl-blue) 20%, transparent); outline: none; }
@@ -2196,17 +2213,51 @@ export function setup(ctx: SpindleFrontendContext) {
 
   let settingsExpanded = false
 
+  const updateModelCatalog = () => {
+    const connection = snapshot?.connections.find((item) => item.id === snapshot?.state.settings.sidecarConnectionId)
+    if (!connection || !modelPicker) return
+    const catalog = modelCatalog?.connectionId === connection.id ? modelCatalog : null
+    const models = [...new Set([connection.model, ...(catalog?.models.map((model) => model.id) ?? [])].filter(Boolean))]
+    modelPicker.update({
+      models,
+      modelLabels: Object.fromEntries(catalog?.models.map((model) => [model.id, model.label]) ?? []),
+      loading: catalog?.loading ?? false,
+    })
+    if (modelStatus) {
+      modelStatus.textContent = catalog?.loading
+        ? 'Loading models…'
+        : catalog?.message || (catalog && !catalog.models.length ? 'No models were returned. You can enter a model ID.' : '')
+    }
+  }
+
+  const requestConnectionModels = (refresh = false) => {
+    const connectionId = snapshot?.state.settings.sidecarConnectionId
+    if (!connectionId || !snapshot?.permissions.includes('generation')) return
+    if (modelCatalog?.connectionId === connectionId && (modelCatalog.loading || !refresh)) return
+    modelCatalog = {
+      connectionId,
+      requestId: String(++modelRequestSequence),
+      models: modelCatalog?.connectionId === connectionId ? modelCatalog.models : [],
+      loading: true,
+      supported: true,
+      message: '',
+    }
+    updateModelCatalog()
+    send({ type: 'load_connection_models', connectionId, requestId: modelCatalog.requestId })
+  }
+
   const renderSettings = (state: TimelineSnapshot) => {
     const card = createElement('section', 'xtl-card xtl-settings')
     const details = document.createElement('details')
     details.open = settingsExpanded
     details.addEventListener('toggle', () => {
       settingsExpanded = details.open
+      if (details.open) requestConnectionModels()
     })
     const summary = createElement('summary', undefined, 'Timeline settings')
     details.appendChild(summary)
 
-    const copy = createElement('p', 'xtl-settings-copy', 'Choose a fast connection for background actor weaves. Your saved Timeline choice is used only by this extension.')
+    const copy = createElement('p', 'xtl-settings-copy', 'Choose a fast connection and model for background actor weaves. Your saved Timeline choices are used only by this extension.')
     details.appendChild(copy)
     const row = createElement('div', 'xtl-settings-row')
     const labels = createElement('div')
@@ -2214,25 +2265,79 @@ export function setup(ctx: SpindleFrontendContext) {
       createElement('div', 'xtl-settings-label', 'Timeline sidecar'),
       createElement('div', 'xtl-settings-hint', 'Used only for actor weaves, replies, and optional chat summaries.'),
     )
-    const connectionSelect = document.createElement('select')
-    connectionSelect.className = 'xtl-select'
-    connectionSelect.setAttribute('aria-label', 'Timeline sidecar connection')
-    const unset = document.createElement('option')
-    unset.value = ''
-    unset.textContent = 'Choose connection…'
-    connectionSelect.appendChild(unset)
-    for (const connection of state.connections) {
-      const option = document.createElement('option')
-      option.value = connection.id
-      option.textContent = `${connection.name} · ${connection.model || connection.provider}${connection.hasApiKey ? '' : ' (no key)'}`
-      option.disabled = !connection.hasApiKey
-      connectionSelect.appendChild(option)
-    }
-    connectionSelect.value = state.state.settings.sidecarConnectionId ?? ''
-    connectionSelect.disabled = !state.permissions.includes('generation')
-    connectionSelect.addEventListener('change', () => send({ type: 'update_settings', sidecarConnectionId: connectionSelect.value || null }))
-    row.append(labels, connectionSelect)
+    const connectionTarget = createElement('div', 'xtl-connection-picker')
+    connectionPicker = ctx.components.mountSelect(connectionTarget, {
+      value: state.state.settings.sidecarConnectionId ?? '',
+      options: state.connections.map((connection) => ({
+        value: connection.id,
+        label: connection.name,
+        sublabel: `${connection.provider} · ${connection.model || 'No model selected'}${connection.hasApiKey ? '' : ' (no key)'}`,
+        disabled: !connection.hasApiKey,
+      })),
+      placeholder: 'Choose connection…',
+      searchPlaceholder: 'Search connections…',
+      searchThreshold: 0,
+      emptyMessage: 'No connections available.',
+      ariaLabel: 'Timeline sidecar connection',
+      clearable: true,
+      clearLabel: 'No sidecar',
+      disabled: !state.permissions.includes('generation'),
+      onChange: (connectionId) => send({ type: 'update_settings', sidecarConnectionId: connectionId || null }),
+    })
+    row.append(labels, connectionTarget)
     details.appendChild(row)
+
+    const connection = state.connections.find((item) => item.id === state.state.settings.sidecarConnectionId)
+    if (modelDraft?.connectionId !== connection?.id) modelDraft = null
+    if (connection) {
+      const modelRow = createElement('div', 'xtl-settings-row')
+      const modelLabels = createElement('div')
+      modelLabels.append(
+        createElement('div', 'xtl-settings-label', 'Sidecar model'),
+        createElement('div', 'xtl-settings-hint', `Leave blank to use the connection model${connection.model ? ` (${connection.model})` : ''}. Choose or enter a model ID, then apply it.`),
+      )
+      const modelControls = createElement('div', 'xtl-model-controls')
+      const modelTarget = createElement('div')
+      const actions = createElement('div', 'xtl-model-actions')
+      const applyModel = button('Apply model', 'xtl-button')
+      const useConnectionModel = button('Use connection model', 'xtl-button xtl-button--quiet')
+      const disabled = !state.permissions.includes('generation') || !connection.hasApiKey
+      const savedModel = state.state.settings.sidecarModelId ?? ''
+      applyModel.disabled = disabled || !modelDraft || modelDraft.value.trim() === savedModel
+      useConnectionModel.disabled = disabled || (!savedModel && !modelDraft?.value)
+      modelPicker = ctx.components.mountModelCombobox(modelTarget, {
+        value: modelDraft?.value ?? savedModel,
+        models: connection.model ? [connection.model] : [],
+        appearance: 'standard',
+        placeholder: connection.model || 'Enter model ID…',
+        emptyMessage: 'No models available. You can enter a model ID.',
+        autoRefreshOnFocus: true,
+        refreshKey: connection.id,
+        disabled,
+        onRefresh: () => requestConnectionModels(true),
+        onChange: (value) => {
+          modelDraft = { connectionId: connection.id, value }
+          applyModel.disabled = disabled || value.trim() === savedModel
+          useConnectionModel.disabled = disabled || (!savedModel && !value)
+        },
+      })
+      applyModel.addEventListener('click', () => {
+        send({ type: 'update_settings', sidecarModelConnectionId: connection.id, sidecarModelId: modelDraft?.value.trim() || null })
+      })
+      useConnectionModel.addEventListener('click', () => {
+        modelDraft = null
+        modelPicker?.update({ value: '' })
+        send({ type: 'update_settings', sidecarModelConnectionId: connection.id, sidecarModelId: null })
+      })
+      modelStatus = createElement('p', 'xtl-model-status')
+      modelStatus.setAttribute('role', 'status')
+      actions.append(applyModel, useConnectionModel)
+      modelControls.append(modelTarget, actions, modelStatus)
+      modelRow.append(modelLabels, modelControls)
+      details.appendChild(modelRow)
+      updateModelCatalog()
+      if (settingsExpanded && !disabled) requestConnectionModels()
+    }
 
     const intervalRow = createElement('div', 'xtl-settings-row')
     const intervalLabels = createElement('div')
@@ -2511,6 +2616,11 @@ export function setup(ctx: SpindleFrontendContext) {
     newWeavePill = null
     personaPicker?.destroy()
     personaPicker = null
+    connectionPicker?.destroy()
+    connectionPicker = null
+    modelPicker?.destroy()
+    modelPicker = null
+    modelStatus = null
     sliderHandles.forEach(h => h.destroy())
     sliderHandles = []
     if (!timelineVisible) {
@@ -2552,7 +2662,19 @@ export function setup(ctx: SpindleFrontendContext) {
     const message = asMessage(payload)
     if (!message) return
 
+    if (message.type === 'timeline_connection_models') {
+      if (!modelCatalog || message.connectionId !== modelCatalog.connectionId || message.requestId !== modelCatalog.requestId) return
+      modelCatalog.models = Array.isArray(message.models) ? message.models : []
+      modelCatalog.loading = false
+      modelCatalog.supported = message.supported !== false
+      modelCatalog.message = message.message ?? ''
+      updateModelCatalog()
+      return
+    }
+
     if (message.type === 'timeline_state' && isSnapshot(message.snapshot)) {
+      if (modelDraft?.connectionId === message.snapshot.state.settings.sidecarConnectionId
+        && modelDraft.value.trim() === (message.snapshot.state.settings.sidecarModelId ?? '')) modelDraft = null
       if (!timelineVisible) {
         // Keep the newest data ready for a later activation, but avoid all
         // sorting, DOM work, and modal rebuilding while this drawer is hidden.
@@ -2706,6 +2828,11 @@ export function setup(ctx: SpindleFrontendContext) {
     unsubscribeKeyboardPresentation()
     personaPicker?.destroy()
     personaPicker = null
+    connectionPicker?.destroy()
+    connectionPicker = null
+    modelPicker?.destroy()
+    modelPicker = null
+    modelStatus = null
     sliderHandles.forEach(h => h.destroy())
     sliderHandles = []
     unsubscribeMessages()

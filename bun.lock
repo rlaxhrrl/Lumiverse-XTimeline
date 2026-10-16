@@ -5,13 +5,13 @@
     "": {
       "name": "lumiverse-timeline",
       "devDependencies": {
-        "lumiverse-spindle-types": "0.6.1",
+        "lumiverse-spindle-types": "0.6.50",
         "typescript": "^5.7.3",
       },
     },
   },
   "packages": {
-    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.6.1", "", {}, "sha512-w9ckXsZDVe5cJS87Vuuo0Nw1imaU7IL/V4uVuoc6CeQOCCMViPa2E8zh3nu9DAtv8xj7vuDQG12KMEkWJpv54A=="],
+    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.6.50", "", {}, "sha512-K1A5+7ylZDh2bbhw1+0KiOwkR1LEBCthSIOpmtx9d6X92itPGMZLnYykw4qAnYK4kOVKFoG8sFQwUTgytLI5tg=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
   }

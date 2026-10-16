@@ -100,6 +100,7 @@ export interface TimelineDirectThread {
 export interface TimelineSettings {
   selectedPersonaId: string | null
   sidecarConnectionId: string | null
+  sidecarModelId: string | null
   feedSort: TimelineFeedSort
   minActorWeaveIntervalMinutes: number
   maxActorWeaveIntervalMinutes: number
@@ -159,6 +160,7 @@ export function createEmptyTimelineState(): TimelineState {
     settings: {
       selectedPersonaId: null,
       sidecarConnectionId: null,
+      sidecarModelId: null,
       feedSort: 'newest',
       minActorWeaveIntervalMinutes: 30,
       maxActorWeaveIntervalMinutes: 120,

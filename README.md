@@ -17,16 +17,18 @@ A private Twitter-like timeline extension for Lumiverse. Users can write **weave
 - Chat weaves use the typed timeline message verbatim. When enabled, their configurable plain-text chat-context snapshot is retained privately for thread replies.
 - Per-user private timeline and direct-message storage via `spindle.userStorage`.
 - Timeline settings for the sidecar, generation parameters (including a per-call maximum token limit), and a reset that clears public posts, reactions, reply threads, and direct messages while preserving followed actors, claimed identities, and settings.
+- Searchable sidecar connection and model pickers. Expand **Timeline settings** to load models from the selected connection using its saved credentials, or refresh the list in the model picker. Choose or enter a model ID and click **Apply model** to save a Timeline-only override. **Use connection model** clears the override; switching connections also clears it. Older hosts and failed model lookups still allow manual model IDs.
 
 ## Permissions
 
 The manifest requests:
 
 - `generation` for actor posts/replies and chat summaries.
+- `cors_proxy` for resolving GIF attachments through the host CORS proxy (`spindle.cors`), used by the Tenor GIF lookup.
 - `characters`, `personas`, and `images` to build the persona and character-card directory and avatars. Lumia DLC items are read from the Spindle DLC catalog and do not require an additional permission.
 - `chats` and `chat_mutation` to safely read the current chat when the user explicitly chooses to weave about it.
 
-If a permission is not granted, the timeline remains usable where possible and hides the dependent action.
+If a permission is not granted, the timeline remains usable where possible and hides the dependent action. Without `cors_proxy`, GIF lookups fail gracefully and posts are still published without a GIF.
 
 ## Development
 

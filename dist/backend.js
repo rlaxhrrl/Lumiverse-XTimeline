@@ -32,6 +32,7 @@ function createEmptyTimelineState() {
     settings: {
       selectedPersonaId: null,
       sidecarConnectionId: null,
+      sidecarModelId: null,
       feedSort: "newest",
       minActorWeaveIntervalMinutes: 30,
       maxActorWeaveIntervalMinutes: 120,
@@ -591,6 +592,7 @@ function normalizeState(value) {
     settings: {
       selectedPersonaId: typeof settings.selectedPersonaId === "string" ? settings.selectedPersonaId : null,
       sidecarConnectionId: typeof settings.sidecarConnectionId === "string" ? settings.sidecarConnectionId : null,
+      sidecarModelId: typeof settings.sidecarConnectionId === "string" && typeof settings.sidecarModelId === "string" ? settings.sidecarModelId.trim() || null : null,
       feedSort: settings.feedSort === "activity" ? "activity" : "newest",
       minActorWeaveIntervalMinutes,
       maxActorWeaveIntervalMinutes,
@@ -674,6 +676,27 @@ function sendError(userId, error, scope = "timeline") {
     scope
   }, userId);
 }
+async function sendConnectionModels(payload, userId) {
+  const connectionId = stringValue(payload.connectionId);
+  const requestId = stringValue(payload.requestId);
+  let models = [];
+  const supported = typeof spindle.connections.getModels === "function";
+  let message = "";
+  try {
+    if (!spindle.permissions.has("generation"))
+      throw new Error("Generation permission is required to list models.");
+    if (!connectionId)
+      throw new Error("Choose a Timeline sidecar connection first.");
+    if (spindle.connections.getModels) {
+      models = await spindle.connections.getModels(connectionId, userId);
+    } else {
+      message = "Model listing requires a newer Lumiverse host. You can still enter a model ID.";
+    }
+  } catch (error) {
+    message = `Could not load models: ${errorMessage(error)}`;
+  }
+  spindle.sendToFrontend({ type: "timeline_connection_models", connectionId, requestId, models, supported, message }, userId);
+}
 function sendActivity(userId, active, actorName, scope = "timeline") {
   spindle.sendToFrontend({ type: "timeline_activity", active, actorName: actorName ?? null, scope }, userId);
 }
@@ -724,10 +747,10 @@ function shuffled(items) {
   return result;
 }
 function takeNextRosterActor(state, actors) {
-  const actorsByKey = new Map(actors.map((actor2) => [actor2.key, actor2]));
+  const actorsByKey = new Map(actors.map((actor) => [actor.key, actor]));
   state.rosterActorQueue = state.rosterActorQueue.filter((key) => actorsByKey.has(key));
   if (!state.rosterActorQueue.length) {
-    state.rosterActorQueue = shuffled(actors.map((actor2) => actor2.key));
+    state.rosterActorQueue = shuffled(actors.map((actor) => actor.key));
     if (state.rosterActorQueue.length > 1 && state.rosterActorQueue[0] === state.rosterLastActorKey) {
       const next = state.rosterActorQueue[1];
       state.rosterActorQueue[1] = state.rosterActorQueue[0];
@@ -853,21 +876,45 @@ function getSidecarConnection(state, directory) {
     throw new Error("The selected Timeline sidecar connection does not have an API key.");
   return connection;
 }
+function parseCorsResponse(result) {
+  if (typeof result === "string")
+    return { status: 200, headers: {}, body: result };
+  if (!isRecord(result))
+    return null;
+  const headers = {};
+  if (isRecord(result.headers)) {
+    for (const [name, value] of Object.entries(result.headers)) {
+      if (typeof value === "string")
+        headers[name.toLowerCase()] = value;
+    }
+  }
+  return {
+    status: typeof result.status === "number" ? result.status : 0,
+    headers,
+    body: typeof result.body === "string" ? result.body : ""
+  };
+}
+async function corsRequest(url, options) {
+  return parseCorsResponse(await spindle.cors(url, options));
+}
+function isSuccessStatus(status) {
+  return status >= 200 && status < 300;
+}
 async function resolveGif(query) {
   const cleanQuery = query.replace(/\s+/g, " ").trim().slice(0, 120);
   if (!cleanQuery)
     return;
   try {
     const url = `https://tenor.com/search/${encodeURIComponent(cleanQuery.replace(/\s+/g, "-"))}-gifs`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok)
+    const response = await corsRequest(url);
+    if (!response || !isSuccessStatus(response.status))
       return;
-    const html = await res.text();
+    const html = response.body;
     const candidates = [...html.matchAll(/<img[^>]+src="([^"]+\.gif)"/g)].map((match) => match[1]).slice(0, 3).sort(() => Math.random() - 0.5);
     for (const candidate of candidates) {
       try {
-        const checkRes = await fetch(candidate, { method: "HEAD", signal: AbortSignal.timeout(3000) });
-        if (checkRes.ok && checkRes.headers.get("content-type")?.includes("image/gif"))
+        const check = await corsRequest(candidate, { method: "HEAD" });
+        if (check && isSuccessStatus(check.status) && check.headers["content-type"]?.includes("image/gif"))
           return candidate;
       } catch {}
     }
@@ -914,6 +961,7 @@ async function runSidecar(state, directory, messages, userId, contentLimit = MAX
     connection_id: connection.id,
     messages,
     parameters: {
+      ...state.settings.sidecarModelId ? { model: state.settings.sidecarModelId } : {},
       temperature: state.settings.temperature ?? 0.85,
       top_p: state.settings.topP ?? 1,
       presence_penalty: state.settings.presencePenalty ?? 0,
@@ -1539,7 +1587,7 @@ async function createScheduledRosterWeave(userId) {
     return;
   }
   const actors = getRosterActors(state, directory);
-  state.rosterActorKeys = actors.map((actor2) => actor2.key);
+  state.rosterActorKeys = actors.map((actor) => actor.key);
   state.rosterActorQueue = state.rosterActorQueue.filter((key) => state.rosterActorKeys.includes(key));
   if (!actors.length) {
     state.rosterLastActorKey = null;
@@ -1644,7 +1692,16 @@ async function updateSettings(payload, userId) {
   }
   const requestedConnectionId = payload.sidecarConnectionId;
   if (requestedConnectionId === null || typeof requestedConnectionId === "string") {
-    state.settings.sidecarConnectionId = typeof requestedConnectionId === "string" && directory.connections.some((connection) => connection.id === requestedConnectionId) ? requestedConnectionId : null;
+    const connectionId = typeof requestedConnectionId === "string" && directory.connections.some((connection) => connection.id === requestedConnectionId) ? requestedConnectionId : null;
+    if (connectionId !== state.settings.sidecarConnectionId)
+      state.settings.sidecarModelId = null;
+    state.settings.sidecarConnectionId = connectionId;
+  }
+  if (payload.sidecarModelId === null || typeof payload.sidecarModelId === "string") {
+    if (payload.sidecarModelConnectionId !== state.settings.sidecarConnectionId) {
+      throw new Error("The Timeline connection changed. Choose a model for the current connection.");
+    }
+    state.settings.sidecarModelId = state.settings.sidecarConnectionId && typeof payload.sidecarModelId === "string" ? payload.sidecarModelId.trim() || null : null;
   }
   if (payload.feedSort === "newest" || payload.feedSort === "activity") {
     state.settings.feedSort = payload.feedSort;
@@ -1809,6 +1866,9 @@ async function handleMessage(payload, userId) {
   if (!isRecord(payload) || typeof payload.type !== "string")
     return;
   switch (payload.type) {
+    case "load_connection_models":
+      await sendConnectionModels(payload, userId);
+      return;
     case "load_timeline":
       {
         const state = await loadState(userId);
