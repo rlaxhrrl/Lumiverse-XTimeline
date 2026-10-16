@@ -35,6 +35,7 @@ If a permission is not granted, the timeline remains usable where possible and h
 ```bash
 bun install
 bun run typecheck
+bun test
 bun run build
 ```
 
