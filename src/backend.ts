@@ -8,6 +8,7 @@ import type {
   PersonaDTO,
   SpindleAPI,
 } from 'lumiverse-spindle-types'
+import { sidecarParameters, withOutputLanguage } from './generation-options'
 import {
   createTimelineId,
   createEmptyTimelineState,
@@ -727,6 +728,7 @@ function normalizeState(value: unknown): TimelineState {
       topP: typeof settings.topP === 'number' ? settings.topP : fallback.settings.topP,
       presencePenalty: typeof settings.presencePenalty === 'number' ? settings.presencePenalty : fallback.settings.presencePenalty,
       frequencyPenalty: typeof settings.frequencyPenalty === 'number' ? settings.frequencyPenalty : fallback.settings.frequencyPenalty,
+      outputLanguage: typeof settings.outputLanguage === 'string' ? settings.outputLanguage.trim().slice(0, 40) : fallback.settings.outputLanguage,
     },
   })
 }
@@ -1154,15 +1156,8 @@ async function runSidecar(
     type: 'quiet',
     userId,
     connection_id: connection.id,
-    messages,
-    parameters: {
-      ...(state.settings.sidecarModelId ? { model: state.settings.sidecarModelId } : {}),
-      temperature: state.settings.temperature ?? 0.85,
-      top_p: state.settings.topP ?? 1.0,
-      presence_penalty: state.settings.presencePenalty ?? 0.0,
-      frequency_penalty: state.settings.frequencyPenalty ?? 0.0,
-      max_tokens: state.settings.maxTokens ?? DEFAULT_GENERATION_MAX_TOKENS,
-    },
+    messages: withOutputLanguage(messages, state.settings.outputLanguage),
+    parameters: sidecarParameters(state.settings, connection.provider),
     reasoning: { source: 'off' },
   })
   return extractAndResolveGif(extractContent(result), contentLimit, outputActor)
@@ -2143,6 +2138,9 @@ async function updateSettings(payload: UnknownRecord, userId: string): Promise<v
   }
   if (typeof payload.frequencyPenalty === 'number') {
     state.settings.frequencyPenalty = Math.max(0, Math.min(2, payload.frequencyPenalty))
+  }
+  if (typeof payload.outputLanguage === 'string') {
+    state.settings.outputLanguage = payload.outputLanguage.trim().slice(0, 40)
   }
   if (scheduleChanged && state.rosterActorKeys.length) {
     state.nextRosterWeaveAt = nextRosterWeaveAt(state.settings)

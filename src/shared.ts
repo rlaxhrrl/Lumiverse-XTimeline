@@ -114,6 +114,8 @@ export interface TimelineSettings {
   topP?: number
   presencePenalty?: number
   frequencyPenalty?: number
+  /** Language for all generated text (posts, replies, DMs, display names). Empty = model decides. */
+  outputLanguage?: string
 }
 
 export interface TimelineState {
@@ -174,6 +176,7 @@ export function createEmptyTimelineState(): TimelineState {
       topP: 1.0,
       presencePenalty: 0.0,
       frequencyPenalty: 0.0,
+      outputLanguage: 'Korean',
     },
   }
 }

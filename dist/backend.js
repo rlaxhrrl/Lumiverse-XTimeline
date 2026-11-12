@@ -45,9 +45,48 @@ function createEmptyTimelineState() {
       temperature: 0.85,
       topP: 1,
       presencePenalty: 0,
-      frequencyPenalty: 0
+      frequencyPenalty: 0,
+      outputLanguage: "Korean"
     }
   };
+}
+
+// src/generation-options.ts
+var PROVIDERS_WITHOUT_PENALTIES = new Set(["google_vertex", "google", "anthropic", "bedrock"]);
+function sidecarParameters(settings, provider) {
+  const parameters = {
+    ...settings.sidecarModelId ? { model: settings.sidecarModelId } : {},
+    temperature: settings.temperature ?? 0.85,
+    max_tokens: settings.maxTokens ?? DEFAULT_GENERATION_MAX_TOKENS
+  };
+  const topP = settings.topP ?? 1;
+  if (topP < 1)
+    parameters.top_p = topP;
+  if (!PROVIDERS_WITHOUT_PENALTIES.has(String(provider || "").toLowerCase())) {
+    if (settings.presencePenalty)
+      parameters.presence_penalty = settings.presencePenalty;
+    if (settings.frequencyPenalty)
+      parameters.frequency_penalty = settings.frequencyPenalty;
+  }
+  return parameters;
+}
+function withOutputLanguage(messages, language) {
+  const target = (language || "").trim();
+  if (!target)
+    return messages;
+  const rule = [
+    `OUTPUT LANGUAGE: Write every piece of text a reader will see in ${target}: weaves, replies, direct messages, and display names.`,
+    `Use natural, casual ${target} as people really write on social media, matching each character's voice.`,
+    "Never translate or alter the output format: keep XML-style tags such as <action>, <target>, <reaction>, <gif>, <display_name>, <handle> exactly as instructed, and keep action keywords (weave, reply, react, dm), post ids and @handles exactly as given. Handles stay lowercase ASCII.",
+    "Write the GIF search query inside <gif> in short English keywords so the GIF search works."
+  ].join(`
+`);
+  const index = messages.findIndex((message) => message.role === "system");
+  if (index < 0)
+    return [{ role: "system", content: rule }, ...messages];
+  return messages.map((message, at) => at === index && typeof message.content === "string" ? { ...message, content: `${message.content}
+
+${rule}` } : message);
 }
 
 // src/backend.ts
@@ -605,7 +644,8 @@ function normalizeState(value) {
       temperature: typeof settings.temperature === "number" ? settings.temperature : fallback.settings.temperature,
       topP: typeof settings.topP === "number" ? settings.topP : fallback.settings.topP,
       presencePenalty: typeof settings.presencePenalty === "number" ? settings.presencePenalty : fallback.settings.presencePenalty,
-      frequencyPenalty: typeof settings.frequencyPenalty === "number" ? settings.frequencyPenalty : fallback.settings.frequencyPenalty
+      frequencyPenalty: typeof settings.frequencyPenalty === "number" ? settings.frequencyPenalty : fallback.settings.frequencyPenalty,
+      outputLanguage: typeof settings.outputLanguage === "string" ? settings.outputLanguage.trim().slice(0, 40) : fallback.settings.outputLanguage
     }
   });
 }
@@ -959,15 +999,8 @@ async function runSidecar(state, directory, messages, userId, contentLimit = MAX
     type: "quiet",
     userId,
     connection_id: connection.id,
-    messages,
-    parameters: {
-      ...state.settings.sidecarModelId ? { model: state.settings.sidecarModelId } : {},
-      temperature: state.settings.temperature ?? 0.85,
-      top_p: state.settings.topP ?? 1,
-      presence_penalty: state.settings.presencePenalty ?? 0,
-      frequency_penalty: state.settings.frequencyPenalty ?? 0,
-      max_tokens: state.settings.maxTokens ?? DEFAULT_GENERATION_MAX_TOKENS
-    },
+    messages: withOutputLanguage(messages, state.settings.outputLanguage),
+    parameters: sidecarParameters(state.settings, connection.provider),
     reasoning: { source: "off" }
   });
   return extractAndResolveGif(extractContent(result), contentLimit, outputActor);
@@ -1752,6 +1785,9 @@ async function updateSettings(payload, userId) {
   }
   if (typeof payload.frequencyPenalty === "number") {
     state.settings.frequencyPenalty = Math.max(0, Math.min(2, payload.frequencyPenalty));
+  }
+  if (typeof payload.outputLanguage === "string") {
+    state.settings.outputLanguage = payload.outputLanguage.trim().slice(0, 40);
   }
   if (scheduleChanged && state.rosterActorKeys.length) {
     state.nextRosterWeaveAt = nextRosterWeaveAt(state.settings);

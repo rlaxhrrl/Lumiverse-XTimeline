@@ -2478,6 +2478,31 @@ export function setup(ctx: SpindleFrontendContext) {
     chatContextRow.append(chatContextLabels, chatContextControls)
     details.appendChild(chatContextRow)
 
+    const languageRow = createElement('div', 'xtl-settings-row')
+    const languageLabels = createElement('div')
+    languageLabels.append(
+      createElement('div', 'xtl-settings-label', 'Output language'),
+      createElement('div', 'xtl-settings-hint', 'Language for every generated weave, reply, DM, and display name (e.g. Korean, English, Japanese). Leave empty to let the model decide.'),
+    )
+    const languageControls = createElement('div', 'xtl-interval-inputs')
+    const language = document.createElement('input')
+    language.type = 'text'
+    language.className = 'xtl-number-input'
+    language.style.width = '8em'
+    language.maxLength = 40
+    language.placeholder = 'Auto'
+    language.value = state.state.settings.outputLanguage ?? ''
+    language.disabled = busy
+    language.setAttribute('aria-label', 'Output language')
+    language.addEventListener('change', () => {
+      const value = language.value.trim().slice(0, 40)
+      language.value = value
+      send({ type: 'update_settings', outputLanguage: value })
+    })
+    languageControls.append(language)
+    languageRow.append(languageLabels, languageControls)
+    details.appendChild(languageRow)
+
     const maxTokensRow = createElement('div', 'xtl-settings-row')
     const maxTokensLabels = createElement('div')
     maxTokensLabels.append(
